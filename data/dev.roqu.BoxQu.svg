@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Bildschirm mit Play-Symbol und kleinem Stern (Anime) -->
+  <rect x="10" y="22" width="108" height="76" rx="16" fill="#1e1e24"/>
+  <rect x="10" y="22" width="108" height="76" rx="16" fill="none" stroke="#e8e6e3" stroke-width="6"/>
+  <path d="M52 44 L80 60 L52 76 Z" fill="#e8e6e3" stroke="#e8e6e3" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M102 6 L106 16 L116 20 L106 24 L102 34 L98 24 L88 20 L98 16 Z" fill="#e8e6e3"/>
+  <rect x="40" y="106" width="48" height="8" rx="4" fill="#e8e6e3"/>
+</svg>
