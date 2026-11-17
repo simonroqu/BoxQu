@@ -1,287 +1,41 @@
 mod source;
 mod moviebox;
 mod aniskip;
-mod controls;
-mod fly;
 mod grid;
-mod icons;
 mod lists;
-mod nav_shape;
 mod player;
 mod progress;
-mod search;
-mod smooth;
 mod show;
-mod theme;
-mod upscale;
 mod watch;
 
+use qu_core::{fly, search};
 use source::Title;
 use gtk4 as gtk;
 use gtk::prelude::*;
-use gtk::{gdk, gio, glib};
+use gtk::{gdk, glib};
 use progress::Resume;
 use show::Play;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::LazyLock;
 
-const APP_NAME: &str = "BoxQu";
-
-static RT: LazyLock<tokio::runtime::Runtime> =
-    LazyLock::new(|| tokio::runtime::Runtime::new().expect("tokio"));
-
-/// Führt `fut` im Hintergrund (tokio) aus; das Ergebnis kommt im GTK-Thread an.
-pub async fn bg<T: Send + 'static>(fut: impl Future<Output = T> + Send + 'static) -> T {
-    RT.spawn(fut).await.expect("Hintergrund-Task abgestürzt")
-}
-
-thread_local! {
-    static BUSY_COUNT: Cell<u32> = const { Cell::new(0) };
-    /// Lade-Kreis in der Nav-Bubble (neben der Suche).
-    static BUSY_ICON: std::cell::OnceCell<gtk::Image> = const { std::cell::OnceCell::new() };
-}
-
-/// Solange ein `Busy` lebt, dreht sich der Lade-Kreis in der Nav-Bubble. Für jedes Laden
-/// (Seiten, Episoden, Stream) eins anlegen und in den Ladevorgang mitnehmen.
-pub struct Busy(());
-
-impl Busy {
-    pub fn new() -> Self {
-        BUSY_COUNT.with(|c| c.set(c.get() + 1));
-        busy_update();
-        Busy(())
-    }
-}
-
-impl Drop for Busy {
-    fn drop(&mut self) {
-        BUSY_COUNT.with(|c| c.set(c.get().saturating_sub(1)));
-        busy_update();
-    }
-}
-
-fn busy_update() {
-    let on = BUSY_COUNT.with(|c| c.get()) > 0;
-    BUSY_ICON.with(|i| {
-        if let Some(i) = i.get() {
-            i.set_visible(on);
-        }
-    });
-}
-
-/// Seitenwechsel mit Verlauf für den Zurück-Button: "browse", "show", "watch".
-struct Nav {
-    stack: gtk::Stack,
-    back: gtk::Button,
-    window: gtk::ApplicationWindow,
-    player: Rc<player::Player>,
-    history: RefCell<Vec<String>>,
-    /// Seiten, von denen man mit „Zurück“ gekommen ist (Maustaste 5 = vor). Neue Wege leeren sie.
-    forward: RefCell<Vec<String>>,
-    /// Schwebende Knöpfe oben links. Auf Übersicht/Titel-Seite immer sichtbar über der Seite;
-    /// beim Video sitzen sie im Player und blenden sich mit dessen Leiste aus und ein.
-    nav_bar: gtk::Revealer,
-    page_layer: gtk::Overlay,
-    in_player: Cell<bool>,
-    watch: Rc<watch::WatchPage>,
-    /// Umgibt die Ansehen-Seite für die Öffnen-/Miniplayer-Animation (fly.rs).
-    zoom: fly::Zoom,
-    /// Knöpfe im Miniplayer (Pause, Ton, Zurück zum Video, Schließen).
-    mini_bar: gtk::Box,
-}
-
-impl Nav {
-    fn current(&self) -> String {
-        self.stack.visible_child_name().map(|s| s.to_string()).unwrap_or_default()
-    }
-
-    fn show(&self, page: &str) {
-        let watch = page == "watch";
-        // Ansehen-Seite erscheint (neu oder aus dem Miniplayer): kurz einblenden.
-        let appear = watch && (self.current() != "watch" || self.watch.is_mini());
-        // Verlässt man die Ansehen-Seite, läuft ein laufendes Video im Miniplayer weiter, sonst stoppt es.
-        if self.current() == "watch" && !watch {
-            self.window.unfullscreen();
-            if self.player.active() {
-                self.set_mini(true);
-            } else {
-                self.close_mini();
-            }
-        }
-        if watch {
-            self.set_mini(false);
-        } else if self.watch.is_mini() && !self.player.active() {
-            // Im Miniplayer zu Ende gelaufen (z. B. „Home“ im Endbildschirm): weg damit.
-            self.close_mini();
-        }
-        self.watch.widget.set_visible(watch || self.watch.is_mini());
-        if appear && !self.zoom.animating() {
-            // Die CSS-Animation startet nur neu, wenn sich ihr Name ändert: zwischen a und b wechseln.
-            let w = &self.watch.widget;
-            let a = w.has_css_class("page-in-a");
-            w.remove_css_class(if a { "page-in-a" } else { "page-in-b" });
-            w.add_css_class(if a { "page-in-b" } else { "page-in-a" });
-        }
-        // Von/zur Ansehen-Seite ohne Überblendung: die liegt als eigene Ebene darüber (Zoom-Animation),
-        // im Stack steht nur ein leerer Platzhalter. Mit Überblendung wäre es beim Schrumpfen dahinter schwarz.
-        let fade = !watch && self.current() != "watch";
-        self.stack.set_transition_type(if fade { gtk::StackTransitionType::Crossfade } else { gtk::StackTransitionType::None });
-        self.stack.set_visible_child_name(page);
-        self.back.set_visible(!self.history.borrow().is_empty());
-
-        if watch != self.in_player.get() {
-            let (from, to) = if watch { (&self.page_layer, &self.player.widget) } else { (&self.player.widget, &self.page_layer) };
-            from.remove_overlay(&self.nav_bar);
-            to.add_overlay(&self.nav_bar);
-            self.in_player.set(watch);
-        }
-        self.nav_bar.set_reveal_child(!watch || self.player.controls.widget.reveals_child());
-    }
-
-    fn set_mini(&self, on: bool) {
-        // Wechsel groß ↔ klein bei laufendem Video: die Seite schrumpft/wächst vom alten Platz aus.
-        let from = (self.watch.is_mini() != on && self.player.active()).then(|| self.zoom.anchor_bounds()).flatten();
-        // Beim Großwerden bleibt die Seite darunter stehen, bis die Animation fertig ist.
-        let backdrop = from.filter(|_| !on).and_then(|_| self.zoom.backdrop(&self.stack));
-        self.watch.set_mini(on);
-        if let Some(from) = from {
-            self.zoom.animate_from(from, backdrop);
-        }
-        // Mini-Knöpfe erst nach dem Schrumpfen: während der Animation wird die schon kleine Seite groß
-        // gezeichnet, die Knöpfe wären riesig. Danach nur, wenn der Player dann noch klein ist.
-        self.mini_bar.set_visible(false);
-        if on {
-            let (bar, watch) = (self.mini_bar.clone(), self.watch.clone());
-            self.zoom.after(move || bar.set_visible(watch.is_mini()));
-        }
-        // Die große Leiste passt nicht in den kleinen Player.
-        self.player.controls.widget.set_visible(!on);
-    }
-
-    /// Miniplayer schließen bzw. Video beenden (speichert die Position).
-    fn close_mini(&self) {
-        // Das Video hat den Tastatur-Fokus. Verschwindet es damit, gibt GTK den Fokus der ersten Karte,
-        // und die Liste springt nach oben. Darum vorher den Fokus abgeben.
-        gtk::prelude::GtkWindowExt::set_focus(&self.window, None::<&gtk::Widget>);
-        self.player.stop();
-        self.set_mini(false);
-        self.watch.widget.set_visible(self.current() == "watch");
-        self.window.set_title(Some(APP_NAME));
-    }
-
-    fn go(&self, page: &str) {
-        let cur = self.current();
-        if cur != page {
-            self.history.borrow_mut().push(cur);
-            self.forward.borrow_mut().clear();
-        }
-        self.show(page);
-    }
-
-    fn back(&self) {
-        let prev = self.history.borrow_mut().pop();
-        if let Some(p) = prev {
-            self.forward.borrow_mut().push(self.current());
-            self.show(&p);
-        }
-    }
-
-    /// Gegenstück zu `back`. ponytail: merkt nur die Seite, nicht ihren Inhalt – die Seiten gibt es je
-    /// einmal und sie zeigen noch, was zuletzt drin war (Titel, Episode).
-    fn forward(&self) {
-        let next = self.forward.borrow_mut().pop();
-        if let Some(p) = next {
-            self.history.borrow_mut().push(self.current());
-            self.show(&p);
-        }
-    }
-
-    fn home(&self) {
-        self.history.borrow_mut().clear();
-        self.forward.borrow_mut().clear();
-        self.show("browse");
-    }
-}
-
-/// Läuft die App unter einem Tiling-Window-Manager?
-/// ponytail: kurze Liste bekannter Tiling-WMs; erweitern, wenn jemand einen anderen nutzt.
-fn tiling_wm() -> bool {
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
-    ["hyprland", "sway", "niri", "river", "i3"].iter().any(|wm| desktop.contains(wm))
-}
+pub use qu_core::{bg, busy::Busy, RT};
 
 fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
     let display = gdk::Display::default().expect("Display");
-    let css = gtk::CssProvider::new();
-    css.load_from_string(include_str!("style.css"));
-    // Eine Stufe über dem Theme (theme.rs): gezielte Regeln wie die Player-Bubbles sollen gewinnen,
-    // GTK entscheidet bei gleicher Priorität nach Ladereihenfolge, nicht nach Genauigkeit.
-    gtk::style_context_add_provider_for_display(&display, &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
-    theme::install(&display);
-    icons::install(&display);
+    // Theme, Icons und CSS in Schichten: Kern < App (style.css) < ~/.config/<app>/style.css.
+    qu_core::style::install(&display, include_str!("style.css"));
 
-    let player = Rc::new(player::Player::new());
+    let player = Rc::new(player::new());
 
-    // Keine Kopfzeile: Zurück, Home und Suche schweben oben links in einer Bubble.
-    let nav_button = |icon: &str, tip: &str| {
-        gtk::Button::builder().icon_name(icon).tooltip_text(tip).focusable(false).css_classes(["flat"]).build()
-    };
-    let back = nav_button("boxqu-back-symbolic", "Back (Esc)");
-    back.set_visible(false);
-    let home = nav_button("boxqu-home-symbolic", "Home");
-    let search_button = nav_button("boxqu-search-symbolic", "Search (/)");
-    let top = gtk::Box::builder().spacing(2).height_request(32).build();
-    top.append(&back);
-    top.append(&home);
-    top.append(&search_button);
-    let busy_icon = icons::spinner(16).visible(false).margin_start(6).margin_end(6).build();
-    BUSY_ICON.with(|i| i.set(busy_icon.clone()).ok());
-    top.append(&busy_icon);
-    let nav_box = nav_shape::NavShape::new();
-    nav_box.set_css_classes(&["bubble", "nav-shape"]);
-    nav_box.append(&top);
-    let nav_bar = gtk::Revealer::builder()
-        .child(&nav_box)
-        .transition_type(gtk::RevealerTransitionType::Crossfade)
-        .reveal_child(true)
-        .halign(gtk::Align::Start)
-        .valign(gtk::Align::Start)
-        .css_classes(["nav-bubble"])
-        .build();
+    // Keine Kopfzeile: das Menü oben links baut qu-core aus `[nav]` in qu.toml.
+    // Fenster, Seitenstapel und Menü oben links (aus qu.toml) baut qu-core.
+    let shell = qu_core::nav::Shell::new(app);
+    let navbar = shell.navbar.clone();
+    let back = navbar.button("back").clone();
+    let home = navbar.button("home").clone();
+    let search_button = navbar.button("search").clone();
 
-    // Nicht homogen: sonst bestimmt die breiteste (auch unsichtbare) Seite die Mindestbreite aller Seiten.
-    let stack = gtk::Stack::builder()
-        .transition_type(gtk::StackTransitionType::Crossfade)
-        .hhomogeneous(false)
-        .vhomogeneous(false)
-        .build();
-    // Ebene 1: Seiten plus Navigation. Ebene 2 (darüber): Suchfenster und Fenster-Knöpfe.
-    let page_layer = gtk::Overlay::builder().child(&stack).build();
-    page_layer.add_overlay(&nav_bar);
-    let root = gtk::Overlay::builder().child(&page_layer).build();
-    // Unter Tiling-Window-Managern schließt man Fenster per Tastenkürzel: keine Fenster-Knöpfe.
-    // Sonst (GNOME, KDE, Windows …) oben rechts in einer eigenen Bubble.
-    if !tiling_wm() {
-        let controls = gtk::WindowControls::builder().side(gtk::PackType::End).css_classes(["bubble"]).build();
-        let wc = gtk::Box::builder().halign(gtk::Align::End).valign(gtk::Align::Start).css_classes(["nav-bubble"]).build();
-        wc.append(&controls);
-        root.add_overlay(&wc);
-    }
-
-    let window = gtk::ApplicationWindow::builder()
-        .application(app)
-        .title(APP_NAME)
-        .default_width(1280)
-        .default_height(860)
-        .decorated(false)
-        .build();
-    if tiling_wm() {
-        window.set_child(Some(&root));
-    } else {
-        // Ohne Titelleiste: an freien Flächen ziehen verschiebt das Fenster.
-        window.set_child(Some(&gtk::WindowHandle::builder().child(&root).build()));
-    }
+    let (stack, root, window) = (shell.stack.clone(), shell.root.clone(), shell.window.clone());
 
     // Titel-Seite öffnen. Wird erst unten befüllt, weil Titel-Seite und Ansehen-Seite sich gegenseitig brauchen.
     let open_show_cell: Rc<std::cell::OnceCell<Rc<dyn Fn(Title)>>> = Rc::default();
@@ -307,124 +61,8 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
     });
     let _ = watch_cell.set(watch.clone());
 
-    // Miniplayer-Knöpfe in den Ecken, je eine Bubble: oben links groß machen, oben rechts schließen,
-    // unten links Play und Ton. Die Symbole folgen den Knöpfen der großen Leiste.
-    let mini_bar = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .margin_start(8)
-        .margin_end(8)
-        .margin_top(8)
-        .margin_bottom(8)
-        .visible(false)
-        .build();
-    let bubble = || gtk::Box::builder().spacing(2).height_request(32).css_classes(["bubble"]).build();
-    let (mini_top_left, mini_top_right, mini_bottom) = (bubble(), bubble(), bubble());
-    let mini_play = nav_button("boxqu-pause-symbolic", "Play/Pause");
-    player.controls.play.bind_property("icon-name", &mini_play, "icon-name").sync_create().build();
-    let mini_mute = nav_button("boxqu-volume-symbolic", "Mute");
-    player.controls.mute.bind_property("icon-name", &mini_mute, "icon-name").sync_create().build();
-    let mini_open = nav_button("boxqu-fullscreen-symbolic", "Back to video");
-    let mini_close = nav_button("boxqu-close-symbolic", "Close");
-    mini_top_left.append(&mini_open);
-    mini_top_right.append(&mini_close);
-    mini_bottom.append(&mini_play);
-    mini_bottom.append(&mini_mute);
-    let top = gtk::CenterBox::builder().start_widget(&mini_top_left).end_widget(&mini_top_right).valign(gtk::Align::Start).vexpand(true).build();
-    mini_bottom.set_halign(gtk::Align::Start);
-    mini_bottom.set_valign(gtk::Align::End);
-    mini_bar.append(&top);
-    mini_bar.append(&mini_bottom);
-    mini_play.connect_clicked({
-        let mpv = player.mpv;
-        move |_| {
-            let _ = mpv.command("cycle", &["pause"]);
-        }
-    });
-    mini_mute.connect_clicked({
-        let controls = player.controls.clone();
-        move |_| controls.toggle_mute()
-    });
-    watch.widget.add_overlay(&mini_bar);
-    // Über den Seiten, unter Navigation (wird beim Seitenwechsel neu obenauf gelegt) und Suche.
-    // In `Zoom` verpackt: geht beim Öffnen aus Karte/Kachel auf, Miniplayer ebenso (fly.rs).
-    let zoom = fly::Zoom::new(&watch.widget, &player.widget);
-    page_layer.add_overlay(&zoom);
-    // Miniplayer ziehen; beim Loslassen gleitet er in die nächste Ecke.
-    let drag = gtk::GestureDrag::new();
-    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let dragging = Rc::new(Cell::new(false));
-    drag.connect_drag_update({
-        let (watch, zoom, dragging) = (watch.clone(), zoom.clone(), dragging.clone());
-        move |g, dx, dy| {
-            if !watch.is_mini() {
-                return;
-            }
-            // Erst ab ein paar Pixeln ist es Ziehen; sonst bleibt es ein Klick (Knöpfe im Miniplayer).
-            if !dragging.get() && dx.hypot(dy) < 8.0 {
-                return;
-            }
-            if !dragging.get() {
-                dragging.set(true);
-                g.set_state(gtk::EventSequenceState::Claimed);
-            }
-            zoom.set_offset(dx as f32, dy as f32);
-        }
-    });
-    // Loslassen nach Ziehen um (dx, dy): in die nächste Ecke gleiten.
-    let snap: Rc<dyn Fn(f32, f32)> = Rc::new({
-        let (watch, zoom) = (watch.clone(), zoom.clone());
-        move |dx, dy| {
-            zoom.set_offset(0.0, 0.0);
-            let (Some(player), Some(page)) = (zoom.anchor_bounds(), watch.widget.compute_bounds(&zoom)) else { return };
-            // Nächste Ecke = Seite, auf der die Mitte des Miniplayers jetzt liegt.
-            let right = page.x() + dx + page.width() / 2.0 > zoom.width() as f32 / 2.0;
-            let bottom = page.y() + dy + page.height() / 2.0 > zoom.height() as f32 / 2.0;
-            watch.set_corner(right, bottom);
-            let from = gtk::graphene::Rect::new(player.x() + dx, player.y() + dy, player.width(), player.height());
-            zoom.animate_from(from, None);
-        }
-    });
-    drag.connect_drag_end({
-        let snap = snap.clone();
-        move |_, dx, dy| {
-            if dragging.replace(false) {
-                snap(dx as f32, dy as f32);
-            }
-        }
-    });
-    watch.widget.add_controller(drag);
-
-    let nav = Rc::new(Nav {
-        stack: stack.clone(),
-        back: back.clone(),
-        window: window.clone(),
-        player: player.clone(),
-        history: RefCell::default(),
-        forward: RefCell::default(),
-        nav_bar: nav_bar.clone(),
-        page_layer: page_layer.clone(),
-        in_player: Cell::new(false),
-        watch: watch.clone(),
-        zoom: zoom.clone(),
-        mini_bar: mini_bar.clone(),
-    });
-    mini_open.connect_clicked({
-        let nav = nav.clone();
-        move |_| nav.go("watch")
-    });
-    mini_close.connect_clicked({
-        let nav = nav.clone();
-        move |_| nav.close_mini()
-    });
-    // Beim Video: Navigation blendet sich zusammen mit der Player-Leiste ein und aus.
-    player.controls.widget.connect_reveal_child_notify({
-        let nav = nav.clone();
-        move |r| {
-            if nav.in_player.get() {
-                nav.nav_bar.set_reveal_child(r.reveals_child());
-            }
-        }
-    });
+    // Seitenverlauf, Ansehen-Seite als Ebene darüber, Miniplayer (ziehbar, Zoom-Animation): qu-core.
+    let nav = qu_core::nav::Nav::new(&shell, player.clone(), watch.frame());
 
 
     // Episode abspielen: Seite sofort, Stream-Adresse im Hintergrund (Archive: eine Anfrage).
@@ -453,7 +91,7 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
             let ep = p.episode().clone();
             // Fenstertitel = Titel und Episode (Alt-Tab, Fensterliste).
             let name = if p.episodes.len() > 1 { format!("{} · Episode {}", p.anime.title, ep.number) } else { p.anime.title.clone() };
-            nav.window.set_title(Some(&format!("{name} – {APP_NAME}")));
+            nav.window.set_title(Some(&format!("{name} – {}", qu_core::config().app.title)));
             let meta = progress::Meta {
                 anime: p.anime.id.clone(),
                 episode: ep.number,
@@ -471,7 +109,7 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
                     return;
                 }
                 match res {
-                    Ok(stream) => player.play(meta, stream),
+                    Ok(stream) => player.play(player::media(meta, stream)),
                     Err(e) => player.show_error(&format!("Couldn't load episode:\n{e}")),
                 }
             });
@@ -654,7 +292,7 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
     });
 
     // Schwebendes Suchfenster über allem.
-    let search = search::SearchModal::new({
+    let search = search::SearchModal::from_config(None, {
         let (grid, nav, open_link) = (grid.clone(), nav.clone(), open_link.clone());
         move |q| {
             if q.starts_with("http") {
@@ -687,7 +325,7 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
         move |w| {
             let full = w.is_fullscreen();
             watch.set_fullscreen(full);
-            fs.set_icon_name(if full { "boxqu-restore-symbolic" } else { "boxqu-fullscreen-symbolic" });
+            fs.set_icon_name(if full { "qu-restore-symbolic" } else { "qu-fullscreen-symbolic" });
         }
     });
     // Endbildschirm „Zur Startseite“.
@@ -832,30 +470,16 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
     })
 }
 
-thread_local! {
-    /// Das Fenster gibt es nur einmal; weitere Starts geben ihre Argumente hierher weiter.
-    static OPEN: std::cell::OnceCell<Rc<dyn Fn(Option<String>)>> = const { std::cell::OnceCell::new() };
-}
-
 fn main() -> glib::ExitCode {
-    // libmpv verlangt LC_NUMERIC=C; ohne setlocale durch GTK bleibt alles auf C.
-    gtk::disable_setlocale();
-    let app = gtk::Application::builder()
-        .application_id("dev.roqu.BoxQu")
-        .flags(if std::env::var_os("BOXQU_DEV").is_some() {
-            // Entwicklung: eigene Instanz neben der installierten, statt Aufrufe an sie weiterzugeben.
-            gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::NON_UNIQUE
-        } else {
-            gio::ApplicationFlags::HANDLES_COMMAND_LINE
-        })
-        .build();
-    // Läuft die App schon, landet ein weiterer Start hier im laufenden Prozess.
-    app.connect_command_line(|app, cmdline| {
-        let arg = cmdline.arguments().get(1).map(|a| a.to_string_lossy().into_owned());
-        let open = OPEN.with(|o| o.get_or_init(|| build(app)).clone());
-        open(arg);
-        glib::ExitCode::SUCCESS
-    });
-    app.run()
+    qu_core::start(include_str!("../qu.toml"), include_str!("../data/dev.roqu.BoxQu.svg"), build)
 }
 
+#[cfg(test)]
+mod tests {
+    /// qu.toml ist gültig (Tippfehler, unbekannte Menüeinträge fallen hier auf statt beim Start).
+    #[test]
+    fn qu_toml() {
+        let c = qu_core::config::Config::parse(include_str!("../qu.toml")).unwrap();
+        assert_eq!(c.app.name, env!("CARGO_PKG_NAME"));
+    }
+}

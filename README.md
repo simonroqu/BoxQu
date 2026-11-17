@@ -62,7 +62,7 @@ the laws of your country and the terms of the services you access.
 - MovieBox API access (request signing, endpoints) ported from
   [MovieBox-Tui](https://github.com/mesamirh/MovieBox-Tui) (MIT/Apache-2.0)
 - [mpv](https://mpv.io) for playback
-- [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow) upscaling shader by igv (GPL-3.0/LGPL-3.0, `data/shaders/`)
+- [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow) upscaling shader by igv (GPL-3.0/LGPL-3.0, via qu-core)
 
 ## License
 

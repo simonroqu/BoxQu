@@ -1,6 +1,7 @@
 //! Raster aus Titel-Karten (Poster). Startseite („Continue watching“, Watchlist, je Quelle ein Bereich),
 //! ganze Quelle und Suche.
 
+use qu_core::cards::{COLUMN_SPACING, TOP_MARGIN, columns, ghost_card, image_height, label, step_columns};
 use crate::source::{self, Title};
 use crate::bg;
 use crate::progress::{self, Resume};
@@ -10,18 +11,6 @@ use gtk::{gdk, glib};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-pub fn fmt_duration(s: u32) -> String {
-    let (h, m, s) = (s / 3600, s / 60 % 60, s % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
-}
-
-/// Kleinste Kartenbreite plus Abstand, um aus der verfügbaren Breite die Spaltenzahl zu berechnen.
-/// Die Karten wachsen dann mit, bis die Reihe gefüllt ist.
-const CARD_WIDTH: i32 = 170;
-/// Höchstens so viele Karten pro Reihe. Hoch genug, dass Poster im Vollbild nicht riesig werden
-/// (Kartenbreite bleibt so etwa zwischen 170 und 250 px).
-const MAX_COLUMNS: i32 = 12;
-const COLUMN_SPACING: i32 = 16;
 /// Höchstens so viele Titel in „Continue watching“.
 const SHELF_MAX: usize = 30;
 /// Pro Quelle auf der Startseite etwa so viele Titel (auf volle Reihen gerundet).
@@ -39,50 +28,6 @@ fn shown_count(available: usize, cols: usize) -> usize {
     if available >= want { want } else { (available / cols * cols).max(available.min(cols)) }
 }
 
-/// Abstand oben bis zur ersten Karte (unter der schwebenden Navigation).
-const TOP_MARGIN: i32 = 56;
-
-/// Mit Strg+Mausrad wählbare Spaltenzahl (Poster: weniger als 4 wären riesig).
-const MIN_WANT: usize = 4;
-const MAX_WANT: usize = 12;
-/// Gewählte Spalten werden nur so weit gezeigt, wie Karten dieser Breite noch passen.
-const MIN_CARD_WIDTH: i32 = 120;
-
-/// Spalten für eine Breite: ohne Wahl so viele Karten wie passen, höchstens `MAX_COLUMNS`;
-/// mit Strg+Mausrad gewählt (`want`) diese Zahl, solange Karten ≥ `MIN_CARD_WIDTH` passen.
-fn columns(width: i32, want: Option<usize>) -> usize {
-    let fit = |card: i32| ((width + COLUMN_SPACING) / (card + COLUMN_SPACING + 8)).max(1) as usize;
-    match want {
-        Some(n) => n.min(fit(MIN_CARD_WIDTH)),
-        None => fit(CARD_WIDTH).min(MAX_COLUMNS as usize),
-    }
-}
-
-/// Eine Spalte mehr (`dy` < 0, Mausrad hoch) oder weniger, in `MIN_WANT..=MAX_WANT`.
-fn step_columns(current: usize, dy: f64) -> usize {
-    let n = if dy < 0.0 { current + 1 } else { current.saturating_sub(1) };
-    n.clamp(MIN_WANT, MAX_WANT)
-}
-
-/// Poster-Höhe (Hochformat 2:3) zur Kartenbreite.
-fn poster_height(width: i32) -> i32 {
-    width * 3 / 2
-}
-
-fn label(text: &str, classes: &[&str]) -> gtk::Label {
-    gtk::Label::builder()
-        .label(text)
-        .xalign(0.0)
-        .wrap(true)
-        .wrap_mode(gtk::pango::WrapMode::WordChar)
-        .lines(2)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .max_width_chars(1) // Breite kommt von der Karte, nicht vom Text
-        .hexpand(true)
-        .css_classes(classes.to_vec())
-        .build()
-}
-
 /// Poster laden (aus dem Cache oder aus dem Netz) und anzeigen.
 pub fn load_poster(pic: &gtk::Picture, url: Option<String>) {
     let Some(url) = url else { return };
@@ -98,29 +43,6 @@ pub fn load_poster(pic: &gtk::Picture, url: Option<String>) {
             pic.add_css_class("loaded");
         }
     });
-}
-
-/// Lade-Platzhalter in Form einer Karte: Poster, Titel, Infos (style.css `.skeleton`). Gibt auch den
-/// Poster-Platzhalter zurück: seine Höhe folgt wie bei echten Karten der Spaltenbreite (`fit`).
-fn ghost_card(width: i32) -> (gtk::Box, gtk::Box) {
-    let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-    let poster = gtk::Box::builder().height_request(poster_height(width)).css_classes(["skeleton"]).build();
-    b.append(&poster);
-    b.append(&part(4, 5, 16));
-    b.append(&part(1, 2, 12));
-    (b, poster)
-}
-
-/// Grauer Balken über `k` von `n` gleich breiten Teilen der Zeile – ohne feste Pixelbreite,
-/// die dem Fenster eine Mindestbreite aufzwänge.
-pub fn part(k: i32, n: i32, height: i32) -> gtk::Grid {
-    let g = gtk::Grid::builder().column_homogeneous(true).build();
-    g.attach(&gtk::Box::builder().height_request(height).css_classes(["skeleton"]).build(), 0, 0, k, 1);
-    // Jede freie Spalte braucht ein Kind, sonst zählt sie bei gleich breiten Spalten nicht mit.
-    for i in k..n {
-        g.attach(&gtk::Box::new(gtk::Orientation::Horizontal, 0), i, 0, 1, 1);
-    }
-    g
 }
 
 /// Was eine Karte beim Anklicken öffnet.
@@ -141,13 +63,13 @@ fn card(item: &Item, width: i32) -> (gtk::Box, gtk::Picture) {
     let pic = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Cover)
         .can_shrink(true)
-        .height_request(poster_height(width))
+        .height_request(image_height(width))
         .css_classes(["thumb"])
         .build();
     load_poster(&pic, a.poster.clone());
     // Nur „Continue watching“ startet direkt eine Episode: Startpunkt der Öffnen-Animation.
     if matches!(item, Item::Resume(_)) {
-        crate::fly::register(&a.id, &pic);
+        qu_core::fly::register(&a.id, &pic);
     }
     // Grauer Platzhalter in Bildgröße, bis das Bild da ist; schneidet auch den Hover-Zoom ab.
     let thumb = gtk::Overlay::builder().child(&pic).overflow(gtk::Overflow::Hidden).css_classes(["thumb-box"]).build();
@@ -317,7 +239,7 @@ impl Grid {
         content.append(&results.title);
         content.append(&results.flow);
         let scroll = gtk::ScrolledWindow::builder().child(&content).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
-        crate::smooth::attach(&scroll);
+        qu_core::smooth::attach(&scroll);
         let widget = gtk::Overlay::builder().child(&scroll).build();
         widget.add_overlay(&sizer);
 
@@ -333,11 +255,11 @@ impl Grid {
             ghost,
             ghost_posters: RefCell::default(),
             view: RefCell::new(View::Home),
-            column_width: Cell::new(CARD_WIDTH),
+            column_width: Cell::new(qu_core::config().grid.card_width),
             width: Cell::new(0),
             columns: Cell::new(0),
             want: Cell::new(
-                std::fs::read_to_string(crate::controls::config_file("columns")).ok().and_then(|s| s.trim().parse().ok()),
+                std::fs::read_to_string(qu_core::app::config_file("columns")).ok().and_then(|s| s.trim().parse().ok()),
             ),
             generation: Cell::new(0),
             on_open: Rc::new(on_open),
@@ -372,7 +294,7 @@ impl Grid {
                 if c.unit() == gdk::ScrollUnit::Wheel && dy != 0.0 {
                     let n = step_columns(grid.columns.get(), dy);
                     grid.want.set(Some(n));
-                    let f = crate::controls::config_file("columns");
+                    let f = qu_core::app::config_file("columns");
                     let _ = std::fs::create_dir_all(f.parent().unwrap());
                     let _ = std::fs::write(f, n.to_string());
                     grid.fit();
@@ -466,11 +388,11 @@ impl Grid {
             self.column_width.set(col_width);
             for s in self.all_sections() {
                 for pic in s.pics.borrow().iter() {
-                    pic.set_height_request(poster_height(col_width));
+                    pic.set_height_request(image_height(col_width));
                 }
             }
             for p in self.ghost_posters.borrow().iter() {
-                p.set_height_request(poster_height(col_width));
+                p.set_height_request(image_height(col_width));
             }
         }
         // Feste Spaltenzahl (FlowBox würde sonst nach der natürlichen Bildbreite umbrechen).
@@ -539,7 +461,7 @@ impl Grid {
         let width = self.column_width.get();
         // ponytail: ~60 px Text unter dem Poster + Reihenabstand geschätzt.
         let h = self.scroll.height();
-        let rows = if h > 0 { (h / (poster_height(width) + 60).max(1)) as usize + 1 } else { 4 };
+        let rows = if h > 0 { (h / (image_height(width) + 60).max(1)) as usize + 1 } else { 4 };
         self.ghost.set_min_children_per_line(cols as u32);
         self.ghost.set_max_children_per_line(cols as u32);
         for _ in 0..rows.max(1) * cols {
@@ -700,10 +622,13 @@ impl Grid {
 mod tests {
     use super::*;
 
+    fn cfg() {
+        qu_core::config::load(include_str!("../qu.toml"));
+    }
+
     #[test]
     fn formats_and_columns() {
-        assert_eq!(fmt_duration(59), "0:59");
-        assert_eq!(fmt_duration(3725), "1:02:05");
+        cfg();
         // Spalten: schmal 1, Standardfenster (1280) 6, Vollbild 1920 → 9, 2560 → 13 → höchstens 12.
         assert_eq!(columns(150, None), 1);
         assert_eq!(columns(1248, None), 6);
@@ -715,7 +640,7 @@ mod tests {
         assert_eq!(step_columns(6, -1.0), 7);
         assert_eq!(step_columns(12, -1.0), 12);
         assert_eq!(step_columns(4, 1.0), 4);
-        assert_eq!(poster_height(200), 300);
+        assert_eq!(image_height(200), 300);
         // Quelle: 12 auf volle Reihen, Vorrat reicht nicht → nur volle Reihen.
         assert_eq!(shown_count(40, 6), 12);
         assert_eq!(shown_count(40, 5), 15);

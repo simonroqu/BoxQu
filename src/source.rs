@@ -565,7 +565,7 @@ async fn subtitle(id: &str, season: usize, episode: usize, mut candidates: Vec<S
 // ---------- Poster ----------
 
 fn cache_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache/boxqu")
+    qu_core::app::cache_dir()
 }
 
 fn hash(s: &str) -> String {

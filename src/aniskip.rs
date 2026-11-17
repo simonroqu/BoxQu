@@ -3,13 +3,7 @@
 
 use std::sync::LazyLock;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Segment {
-    pub start: f64,
-    pub end: f64,
-    /// Anzeigename für den Knopf („Skip intro“, „Skip ending“).
-    pub label: &'static str,
-}
+pub use qu_core::segments::Segment;
 
 static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
@@ -42,15 +36,11 @@ fn parse(json: &serde_json::Value) -> Vec<Segment> {
     out
 }
 
-/// Liegt `pos` in einem Abschnitt? Dann dessen Index. Kurz vor dem Ende nicht mehr (Sprung um Bruchteile
-/// einer Sekunde lohnt nicht).
-pub fn segment_at(segments: &[Segment], pos: f64) -> Option<usize> {
-    segments.iter().position(|s| pos >= s.start && pos < s.end - 0.5)
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use qu_core::segments::segment_at;
 
     #[test]
     fn parses_and_decides() {
