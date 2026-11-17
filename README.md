@@ -55,7 +55,7 @@ Double-click left/right on the player seeks −/+10 s, the middle toggles fullsc
 ## Disclaimer
 
 BoxQu does not host any content; it only plays what MovieBox provides. Use it in accordance with
-the laws of your country and the terms of the services you access.
+the laws of your country and the terms of the services you access. BoxQu is not affiliated with MovieBox or with any rights holder.
 
 ## Credits
 
