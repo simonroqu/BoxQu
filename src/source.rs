@@ -520,8 +520,11 @@ pub async fn stream(episode_id: String) -> Result<Stream, String> {
             headers.push(("Cookie".to_string(), d.cookie));
         }
         candidates.extend(d.resource_id);
-        // Ein Manifest mit allen Stufen: mpv wählt selbst.
-        (vec![(d.height, d.url)], headers)
+        // Über den lokalen Zwischenserver (lädt parallel vor, je Höhe ein Manifest); geht das nicht, direkt wie bisher.
+        match crate::dash::serve(&d.url, headers.clone()).await {
+            Some(variants) => (variants, vec![]),
+            None => (vec![(d.height, d.url)], headers),
+        }
     } else if placeholders > 0 {
         return Err("MovieBox is serving a placeholder clip instead of this title".into());
     } else {

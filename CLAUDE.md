@@ -32,6 +32,7 @@ Eine laufende installierte Instanz bekommt das neue Binary erst nach einem Neust
 | `main.rs` | Fenster, Navigation (`Nav`: `browse`/`show`/`watch`, Verlauf zurück/vor), Nav-Bubble, Tasten, Maus-Seitentasten, Startargumente, `play`/`resume`, `open_link` (Strg+V, Link in der Suche, Startargument) |
 | `moviebox.rs` | MovieBox-API: Gerät (User-Agent/`x-client-info`, einmal pro Start ausgewürfelt), Signatur (`x-tr-signature` HMAC-MD5, `x-client-build`), Besucher-Login (Token in `~/.cache/boxqu/moviebox-session`, `exp` aus dem JWT), Host-Pool mit Weiterschalten; liefert rohes JSON (`data`) |
 | `source.rs` | **Einzige Stelle, die Inhalte holt**: Endpunkte + JSON → Typen. Feste Startseiten-Bereiche, Suche, Titel-Seite, Episoden, Stream + Untertitel, Poster, Listen-Cache |
+| `dash.rs` | Lokaler Zwischenserver für MovieBox-DASH (127.0.0.1, zufälliger Port, ein Stream zur Zeit): je Bildhöhe ein eigenes Manifest (→ Qualitätsmenü), jedes Stück in Range-Teilen parallel (erst 64 KB für die Größe, dann 256 KB), die nächsten `AHEAD` Stücke je Spur vorab, Teile bis zu 3 Versuche. Aufwärmen wie MovieBox-Tui: `serve` holt sofort Init + erstes Stück aller Spuren (ffmpeg fragt beim Öffnen immer danach, auch beim Fortsetzen), während `stream()` noch Untertitel lädt. Nur HTTP/1.1 (über HTTP/2 teilen sich alle Teile eine gedrosselte Verbindung) |
 | `aniskip.rs` | aus AniQu, derzeit ungenutzt (`Stream::mal_id` immer `None`); `Segment` treibt den „Skip intro“-Knopf – Platz für spätere Intro-Zeiten (z. B. Jellyfin Media Segments) |
 | `grid.rs` | Poster-Raster: Startseite („Continue watching“, Watchlist, dann je Quelle ein Bereich mit ~12 Titeln auf volle Reihen, ohne Watchlist-Titel), Überschrift einer Quelle: Klick = alle Titel (`show_source`), Rechtsklick = entfernen; Rechtsklick-Menü der Karten (`card_menu`), Suche; Strg+Mausrad = Spalten 4–12 (`~/.config/boxqu/columns`) |
 | `show.rs` | Titel-Seite: Poster, Infos, Beschreibung, Sprach-Tabs (`set_languages`), Lesezeichen-Knopf (Watchlist), Episoden-Kacheln (Film = eine Kachel „Play“); `Play` (Episode + Liste). `open` springt zur bevorzugten Sprachfassung, `open_as(…, false)` nicht (Tab-Klick, Reload) |
@@ -56,6 +57,10 @@ Eine laufende installierte Instanz bekommt das neue Binary erst nach einem Neust
   CloudFront-Cookie, Header Referer `sportslive.wine` + User-Agent + Cookie), wenn es keine Dateien gibt oder DASH höher
   auflöst (Serien: direkt oft nur 360p). Header → mpv per `loadfile`-Optionen (`player.rs` `header_opts`).
   Geprüft 2026-11-16: mpv spielt das DASH-Manifest mit diesen Headern.
+- DASH läuft über `dash.rs` (Fallback: direkt wie oben, wenn das Manifest nicht geht). Grund (gemessen 2026-11-18,
+  Community S1E1): `sbcdn3` drosselt **jede Verbindung** auf ≈140 KB/s, mpv lädt die 5-s-Stücke nacheinander → 1080p
+  kam mit ≈0,3× Echtzeit, Serien stockten ständig. Über den Zwischenserver: erstes Bild nach ≈1,5 s (Fortsetzen mitten in der Folge ≈3 s),
+  danach ≈12× Echtzeit. Direkte Dateien (`bcdn`) sind nicht gedrosselt (≈10 MB/s).
 - Untertitel (`subtitle`): `get-ext-captions` mit Kandidaten-IDs nacheinander (bis 3): Ressourcen-IDs der Dateien, der
   `resource/v2`-Liste (auch Hinweis-Clips), Stream-ID von play-info; sonst wie die TUI die Folge in der alten Liste
   `subject-api/resource` suchen (filtert nicht nach Folge, 20 pro Seite). Die Stream-ID allein findet bei Original-

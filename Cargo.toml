@@ -18,7 +18,7 @@ libmpv2 = "7"
 libmpv2-sys = "4"
 reqwest = "0.12"
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "fs", "process", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "fs", "process", "macros", "net", "io-util"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "test-util", "time", "sync", "rt-multi-thread"] }

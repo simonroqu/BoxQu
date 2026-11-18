@@ -2,6 +2,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod source;
+mod dash;
 mod moviebox;
 mod aniskip;
 mod grid;
