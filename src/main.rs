@@ -313,21 +313,7 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
         move |_| search.reset()
     });
 
-    // Vollbild: Infos ausblenden, nur noch Video.
-    player.controls.fullscreen.connect_clicked({
-        let window = window.clone();
-        move |_| {
-            if window.is_fullscreen() { window.unfullscreen() } else { window.fullscreen() }
-        }
-    });
-    window.connect_fullscreened_notify({
-        let (watch, fs) = (watch.clone(), player.controls.fullscreen.clone());
-        move |w| {
-            let full = w.is_fullscreen();
-            watch.set_fullscreen(full);
-            fs.set_icon_name(if full { "qu-restore-symbolic" } else { "qu-fullscreen-symbolic" });
-        }
-    });
+    // Vollbild-Knopf und Fenster-Vollbild regelt qu-core (`Nav::set_video_fullscreen`).
     // Endbildschirm „Zur Startseite“.
     player.end_home.connect_clicked({
         let home = home.clone();
@@ -394,8 +380,8 @@ fn build(app: &gtk::Application) -> Rc<dyn Fn(Option<String>)> {
             // Miniplayer: nur die Video-Tasten; Pfeile/Ziffern bleiben fürs Raster.
             let mini = !watching && nav.watch.is_mini();
             let handled = match key {
-                gdk::Key::Escape if window.is_fullscreen() => {
-                    window.unfullscreen();
+                gdk::Key::Escape if nav.video_fullscreen() => {
+                    nav.set_video_fullscreen(false);
                     true
                 }
                 gdk::Key::Escape => {
