@@ -1,3 +1,6 @@
+// Unter Windows ohne zusätzliches Konsolenfenster starten.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod source;
 mod moviebox;
 mod aniskip;

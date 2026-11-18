@@ -40,8 +40,10 @@ pub fn new() -> Player {
 pub fn media(meta: Meta, stream: Stream) -> Media<Item> {
     let mut opts = header_opts(&stream.headers);
     if !stream.subtitles.is_empty() {
-        // Lokale Dateien (`source::stream` lädt sie vorher): `sub-files` ist eine Pfadliste mit „:“ als Trenner.
-        opts.push(format!("sub-files={}", quoted(&stream.subtitles.join(":"))));
+        // Lokale Dateien (`source::stream` lädt sie vorher): `sub-files` ist eine Pfadliste, Trenner wie bei PATH
+        // („:“, unter Windows „;“, dort steckt „:“ ja in „C:\“).
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        opts.push(format!("sub-files={}", quoted(&stream.subtitles.join(sep))));
     }
     Media {
         start: progress::resume_at(&meta.anime, meta.episode),

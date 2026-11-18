@@ -1,6 +1,6 @@
 # BoxQu
 
-A lightweight movie and series player for Linux, written in Rust with GTK4 and libmpv.
+A lightweight movie and series player for Linux (and, untested, Windows and macOS), written in Rust with GTK4 and libmpv.
 Same look and feel as AniQu and [Tube](https://github.com/simonroqu/tube).
 
 A desktop movie and series player for MovieBox: poster grid, search and an embedded player.
@@ -19,12 +19,57 @@ Standalone, no other tools needed besides GTK and mpv.
 - mpv / libmpv
 - Optional: `mpv-mpris` for media keys
 
-## Build & install
+## Install
+
+One script per platform: it installs whatever is missing (GTK, mpv, Rust), builds BoxQu and adds it to
+your app launcher / start menu. The first run takes a while (downloading and compiling), later runs are quick.
+
+### Linux
 
 ```sh
-cargo build --release
-./install.sh        # installs to ~/.local/bin/boxqu and adds a launcher entry
+git clone https://github.com/simonroqu/BoxQu
+cd BoxQu
+./install.sh
 ```
+
+Supports Arch, Debian/Ubuntu, Fedora and openSUSE (asks for your sudo password if packages are missing).
+Needs a distribution with GTK ≥ 4.20 (e.g. Arch, Fedora 43, Ubuntu 25.10).
+Installs to `~/.local/bin/boxqu` plus a launcher entry and icon.
+
+### macOS (untested)
+
+Needs [Homebrew](https://brew.sh). Then in Terminal:
+
+```sh
+git clone https://github.com/simonroqu/BoxQu
+cd BoxQu
+./install.sh
+```
+
+Installs `~/Applications/BoxQu.app` (shows up in Launchpad and Spotlight, no icon yet) and `~/.local/bin/boxqu`.
+
+### Windows (untested)
+
+In PowerShell:
+
+```powershell
+winget install -e --id Git.Git      # once, if git is missing (then open a new PowerShell)
+git clone https://github.com/simonroqu/BoxQu
+cd BoxQu
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The script installs [MSYS2](https://www.msys2.org) (if missing) and builds BoxQu with GTK and mpv from there.
+Installs to `%LOCALAPPDATA%\Programs\BoxQu` plus a start menu entry.
+
+### Update and uninstall
+
+- Update: `git pull` in the folder, then run the install script again. It always builds against the latest
+  [qu-core](https://github.com/simonroqu/quCore).
+- Uninstall: delete the files the install script lists at the end.
+- Building fetches qu-core from GitHub, so it has to be reachable from your machine.
+
+## Usage
 
 Run directly:
 

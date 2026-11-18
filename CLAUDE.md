@@ -20,6 +20,9 @@ cargo run -- dune                    # direkt suchen
 ./install.sh                         # ~/.local/bin/boxqu + Startmenü-Eintrag + Icon
 ```
 
+Install-Skripte für Linux/macOS/Windows (`install.sh`, `install.ps1`, `windows-bundle.sh`) sind in allen Apps gleich, siehe
+`~/Work/aniqu/CLAUDE.md` Abschnitt Windows.
+
 Eine laufende installierte Instanz bekommt das neue Binary erst nach einem Neustart.
 
 ## Aufbau (`src/`)
@@ -60,7 +63,7 @@ Eine laufende installierte Instanz bekommt das neue Binary erst nach einem Neust
   (zusammen höchstens 8 s) und per `sub-files` (lokale Pfadliste, „:“-getrennt – mit Adressen ginge das nicht) geladen;
   `sub-add` wäre nur blockierend (libmpv2 ohne async-Befehl). mpv nimmt den Dateinamen als Spur-Titel (Sprache bleibt
   leer), daher beobachtet `player.rs` `current-tracks/sub/title` für die Meldung „Subtitles: English“ / „Subtitles off“.
-- Untertitel-Knopf (wie Tubequ): Linksklick/`c` = an/aus, Rechtsklick = Menü (Sprache, Größe, Hintergrund).
+- Untertitel-Knopf (wie TubeQu): Linksklick/`c` = an/aus, Rechtsklick = Menü (Sprache, Größe, Hintergrund).
   Gespeichert in `~/.config/boxqu/subtitles` (Sprache = Spur-Name, Größe, `box`/`outline`, `on`/`off`); an/aus gilt
   auch fürs nächste Video (`Controls::apply_subs` bei `FileLoaded`). Einblendungen „Subtitles: …“ nicht in den
   ersten 1,5 s nach `play`.
@@ -88,8 +91,8 @@ Eine laufende installierte Instanz bekommt das neue Binary erst nach einem Neust
 
 ## Design-Regeln
 
-Wie Tubequ (siehe `~/Work/tubequ/CLAUDE.md`): keine Kopfzeile, Nav-Bubble oben links, Buttons nur Icons mit Tooltip,
-Laden von Inhalten = graue Platzhalter in Form des Inhalts mit Glanzstreifen (qu-core-CSS `.skeleton`, wie Tubequ): Raster `grid.rs` `ghost_card`/`set_ghost` (Breiten über `part`, keine festen Pixel), Titel-Seite `show.rs` `set_loading` (Infos, Beschreibung, Poster-Fläche, Episoden-Kacheln); sonst (Bubble, Player) Spinner = `icons::spinner()` (nie `gtk::Spinner`), keine knalligen Farben, keine festen Pixelbreiten im Raster.
+Wie TubeQu (siehe `~/Work/tubequ/CLAUDE.md`): keine Kopfzeile, Nav-Bubble oben links, Buttons nur Icons mit Tooltip,
+Laden von Inhalten = graue Platzhalter in Form des Inhalts mit Glanzstreifen (qu-core-CSS `.skeleton`, wie TubeQu): Raster `grid.rs` `ghost_card`/`set_ghost` (Breiten über `part`, keine festen Pixel), Titel-Seite `show.rs` `set_loading` (Infos, Beschreibung, Poster-Fläche, Episoden-Kacheln); sonst (Bubble, Player) Spinner = `icons::spinner()` (nie `gtk::Spinner`), keine knalligen Farben, keine festen Pixelbreiten im Raster.
 Poster im Hochformat 2:3, Karten ab 170 px, höchstens 12 Spalten (im Vollbild sonst riesige Poster).
 
 ## Produktentscheidungen (so gewollt – nicht ohne Rückfrage ändern)
