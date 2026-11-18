@@ -1,0 +1,26 @@
+[package]
+name = "boxqu-core"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "BoxQu ohne Oberfläche: MovieBox, DASH-Zwischenserver, Fortschritt, Listen (für die GTK-App und Android)"
+
+[dependencies]
+qu-core = { git = "https://github.com/simonroqu/quCore", default-features = false }
+base64 = "0.22"
+# MovieBox-Signatur (HMAC-MD5)
+hmac = "0.13"
+md-5 = "0.11"
+# TLS: Desktop wie bisher (System), Android mit rustls (OpenSSL lässt sich dort schlecht bauen).
+reqwest = { version = "0.12", default-features = false, features = ["charset", "http2"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "fs", "macros", "net", "io-util"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["default-tls"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "test-util", "time", "sync", "rt-multi-thread"] }

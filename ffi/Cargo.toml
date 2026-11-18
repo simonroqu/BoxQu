@@ -1,0 +1,19 @@
+[package]
+name = "boxqu-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "boxqu-core für Kotlin (UniFFI) – Brücke der Android-App"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# Erzeugt die Kotlin-Anbindung: cargo run -p boxqu-ffi --bin uniffi-bindgen -- generate --library … (android/build-rust.sh)
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+boxqu-core = { path = "../core" }
+qu-core = { git = "https://github.com/simonroqu/quCore", default-features = false }
+uniffi = { version = "0.32.2", features = ["cli"] }

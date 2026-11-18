@@ -1,14 +1,10 @@
 // Unter Windows ohne zusätzliches Konsolenfenster starten.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-mod source;
-mod dash;
-mod moviebox;
-mod aniskip;
+use boxqu_core::{aniskip, lists, progress, source};
+
 mod grid;
-mod lists;
 mod player;
-mod progress;
 mod show;
 mod watch;
 

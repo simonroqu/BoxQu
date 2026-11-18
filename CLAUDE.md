@@ -10,6 +10,11 @@ upstream, dort nichts ändern) ist nur noch Nachschlagewerk, wenn MovieBox etwas
 **Diese Datei bei jeder Änderung am Projekt mitpflegen** (gleicher Schritt wie die Code-Änderung), damit eine
 neue Session sofort Bescheid weiß. Nur Entwicklungsrelevantes, keine persönlichen Bemerkungen.
 
+**Zwei Oberflächen, eine Logik:** Desktop (GTK, `src/`) und Android/TV (Compose, `android/`). Jede Änderung am Aussehen
+oder an der Bedienung **immer in beiden** umsetzen (gleicher Schritt), Android danach per Fernbedienung prüfen. Logik
+gehört nach `core/` und gilt dann für beide; neue Funktionen für Android in `ffi/` exportieren. Geht etwas nur auf einer
+Seite (z. B. Miniplayer, Upscaling), kurz beim Nutzer nachfragen.
+
 ## Bauen, starten, installieren
 
 ```bash
@@ -25,21 +30,30 @@ Install-Skripte für Linux/macOS/Windows (`install.sh`, `install.ps1`, `windows-
 
 Eine laufende installierte Instanz bekommt das neue Binary erst nach einem Neustart.
 
-## Aufbau (`src/`)
+## Android (`android/` + `ffi/`, Stand 2026-11-18, in Waydroid getestet: Trending, Suche, Titel-Seite mit Sprach-Tabs, Film, Serie über DASH-Zwischenserver, Untertitel)
+
+Wie AniQu (Werkzeuge, Bauen, Waydroid-Test, Fernbedienungs-Regeln: `~/Work/aniqu/CLAUDE.md` Abschnitt Android; Bausteine
+aus qu-core `android/`). `ffi/` = `boxqu-ffi` (UniFFI über `boxqu-core`), `android/app/.../MainActivity.kt` = Seiten
+(Home mit Bereichen aus `sections()`, Suchergebnisse, Titel-Seite, Player). Eigenheiten: DASH läuft auch hier über den
+lokalen Zwischenserver (`core/dash.rs` läuft in der App mit, `http://127.0.0.1` per `network_security_config.xml` erlaubt), Stufe ≤ 1080p,
+Untertitel SRT, Film = eine Kachel „Play“, Titel-Seite springt zur bevorzugten Sprachfassung (`preferred`).
+`cd android && ./gradlew assembleDebug`.
+
+## Aufbau (`src/` = GTK-App, `core/` = Crate `boxqu-core` ohne Oberfläche: `moviebox`, `source`, `dash`, `aniskip`, `progress`, `lists`)
 
 | Datei | Aufgabe |
 |---|---|
 | `main.rs` | Fenster, Navigation (`Nav`: `browse`/`show`/`watch`, Verlauf zurück/vor), Nav-Bubble, Tasten, Maus-Seitentasten, Startargumente, `play`/`resume`, `open_link` (Strg+V, Link in der Suche, Startargument) |
-| `moviebox.rs` | MovieBox-API: Gerät (User-Agent/`x-client-info`, einmal pro Start ausgewürfelt), Signatur (`x-tr-signature` HMAC-MD5, `x-client-build`), Besucher-Login (Token in `~/.cache/boxqu/moviebox-session`, `exp` aus dem JWT), Host-Pool mit Weiterschalten; liefert rohes JSON (`data`) |
-| `source.rs` | **Einzige Stelle, die Inhalte holt**: Endpunkte + JSON → Typen. Feste Startseiten-Bereiche, Suche, Titel-Seite, Episoden, Stream + Untertitel, Poster, Listen-Cache |
-| `dash.rs` | Lokaler Zwischenserver für MovieBox-DASH (127.0.0.1, zufälliger Port, ein Stream zur Zeit): je Bildhöhe ein eigenes Manifest (→ Qualitätsmenü), jedes Stück in Range-Teilen parallel (erst 64 KB für die Größe, dann 256 KB), die nächsten `AHEAD` Stücke je Spur vorab, Teile bis zu 3 Versuche. Aufwärmen wie MovieBox-Tui: `serve` holt sofort Init + erstes Stück aller Spuren (ffmpeg fragt beim Öffnen immer danach, auch beim Fortsetzen), während `stream()` noch Untertitel lädt. Nur HTTP/1.1 (über HTTP/2 teilen sich alle Teile eine gedrosselte Verbindung) |
-| `aniskip.rs` | aus AniQu, derzeit ungenutzt (`Stream::mal_id` immer `None`); `Segment` treibt den „Skip intro“-Knopf – Platz für spätere Intro-Zeiten (z. B. Jellyfin Media Segments) |
+| `core/moviebox.rs` | MovieBox-API: Gerät (User-Agent/`x-client-info`, einmal pro Start ausgewürfelt), Signatur (`x-tr-signature` HMAC-MD5, `x-client-build`), Besucher-Login (Token in `~/.cache/boxqu/moviebox-session`, `exp` aus dem JWT), Host-Pool mit Weiterschalten; liefert rohes JSON (`data`) |
+| `core/source.rs` | **Einzige Stelle, die Inhalte holt**: Endpunkte + JSON → Typen. Feste Startseiten-Bereiche, Suche, Titel-Seite, Episoden, Stream + Untertitel, Poster, Listen-Cache |
+| `core/dash.rs` | Lokaler Zwischenserver für MovieBox-DASH (127.0.0.1, zufälliger Port, ein Stream zur Zeit): je Bildhöhe ein eigenes Manifest (→ Qualitätsmenü), jedes Stück in Range-Teilen parallel (erst 64 KB für die Größe, dann 256 KB), die nächsten `AHEAD` Stücke je Spur vorab, Teile bis zu 3 Versuche. Aufwärmen wie MovieBox-Tui: `serve` holt sofort Init + erstes Stück aller Spuren (ffmpeg fragt beim Öffnen immer danach, auch beim Fortsetzen), während `stream()` noch Untertitel lädt. Nur HTTP/1.1 (über HTTP/2 teilen sich alle Teile eine gedrosselte Verbindung) |
+| `core/aniskip.rs` | aus AniQu, derzeit ungenutzt (`Stream::mal_id` immer `None`); `Segment` treibt den „Skip intro“-Knopf – Platz für spätere Intro-Zeiten (z. B. Jellyfin Media Segments) |
 | `grid.rs` | Poster-Raster: Startseite („Continue watching“, Watchlist, dann je Quelle ein Bereich mit ~12 Titeln auf volle Reihen, ohne Watchlist-Titel), Überschrift einer Quelle: Klick = alle Titel (`show_source`), Rechtsklick = entfernen; Rechtsklick-Menü der Karten (`card_menu`), Suche; Strg+Mausrad = Spalten 4–12 (`~/.config/boxqu/columns`) |
 | `show.rs` | Titel-Seite: Poster, Infos, Beschreibung, Sprach-Tabs (`set_languages`), Lesezeichen-Knopf (Watchlist), Episoden-Kacheln (Film = eine Kachel „Play“); `Play` (Episode + Liste). `open` springt zur bevorzugten Sprachfassung, `open_as(…, false)` nicht (Tab-Klick, Reload) |
 | `player.rs` | Player-Anbindung an qu-core: `Hooks` (User-Agent, Fortschritt pro Episode, Tempo pro Titel) und `media(meta, stream)` (HTTP-Header, Untertitel-Dateien, Fortsetzen). Item = `(Meta, MAL-ID)` |
 | `watch.rs` | Infos unter dem Video (Titel → Titel-Seite, Episode, vorige/nächste) im `WatchFrame` aus qu-core |
-| `progress.rs` | Fortschritt pro Episode, „Continue watching“ (fertig → nächste Episode; `total` 1 = Film, Karte ohne Episodennummer); „Watched“ = `hide` (`hidden.tsv`: ID + Zeitpunkt): Titel bleibt aus „Continue watching“, bis danach wieder eine Episode gespeichert wird (neuerer Zeitstempel) |
-| `lists.rs` | Suchverlauf, Watchlist (`~/.local/share/boxqu/watchlist.tsv`: `source::read_list`/`write_list`), Tempo pro Titel, bevorzugte Sprache (`language`, `preferred`) |
+| `core/progress.rs` | Fortschritt pro Episode, „Continue watching“ (fertig → nächste Episode; `total` 1 = Film, Karte ohne Episodennummer); „Watched“ = `hide` (`hidden.tsv`: ID + Zeitpunkt): Titel bleibt aus „Continue watching“, bis danach wieder eine Episode gespeichert wird (neuerer Zeitstempel) |
+| `core/lists.rs` | Suchverlauf, Watchlist (`~/.local/share/boxqu/watchlist.tsv`: `source::read_list`/`write_list`), Tempo pro Titel, bevorzugte Sprache (`language`, `preferred`) |
 | `qu.toml` | App-Konfiguration für qu-core: Name/Titel/ID/Startmenü-Texte, **Menü oben links** (`[nav]`), Suche, Player, Fortschrittsregeln, Raster. Format in `~/Work/quCore/CLAUDE.md`; Test `qu_toml` in `main.rs` prüft sie |
 | **qu-core** (`~/Work/quCore`) | Gemeinsamer Unterbau, **dort ändern**: App-Start (`start`, `--install`), Dateien/Tempo (`store`), Fortschrittsregeln (`progress`), Raster-Bausteine (`cards`), Fenster/Seitenverlauf/Miniplayer (`nav`), Player (`player`, `controls`, Rahmen `watch`), Menü (`navbar`), Ladeanzeige (`Busy`), `bg`, CSS-Schichten (`style`), `app` (Pfade), `theme`, gemeinsames CSS (`qu_core::CSS`), `icons` (`qu-*-symbolic`), `nav_shape`, `fly`, `smooth`, `search` (Suchfenster + Suchverlauf), `upscale` (Shader-Set hier: `UPSCALER` in `controls.rs`). Beschreibung in `~/Work/quCore/CLAUDE.md` |
 | `style.css` | Nur App-eigenes CSS (Poster-Badges `.badge`, Episoden-Kacheln `.episode`); geladen nach `qu_core::CSS` |
